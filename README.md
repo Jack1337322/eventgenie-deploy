@@ -123,6 +123,7 @@ src/
 
 - [EventGenie Backend](https://github.com/Jack1337322/eventgenie-backend)
 - [EventGenie Frontend](https://github.com/Jack1337322/eventgenie-frontend)
+- [EventGenie Agents](https://github.com/Jack1337322/eventgenie-agents)
 
 ## 🧪 Тестирование
 
