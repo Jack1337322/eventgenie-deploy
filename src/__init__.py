@@ -1,2 +1,0 @@
-# EventGenie Agents Service
-
