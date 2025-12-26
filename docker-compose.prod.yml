@@ -1,0 +1,109 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: eventgenie-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-eventgenie}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-eventgenie}
+    command: 
+      - "postgres"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "max_connections=200"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eventgenie}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - eventgenie-network
+    restart: unless-stopped
+
+  # EventGenie Agents Service
+  agents-service:
+    build:
+      context: ./repos/eventgenie-agents
+      dockerfile: Dockerfile
+    container_name: eventgenie-agents
+    environment:
+      GIGACHAT_CLIENT_ID: ${GIGACHAT_CLIENT_ID}
+      GIGACHAT_CLIENT_SECRET: ${GIGACHAT_CLIENT_SECRET}
+      GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat}
+      GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-eventgenie}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-eventgenie}
+    ports:
+      - "${AGENTS_PORT:-8001}:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - eventgenie-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # EventGenie Backend Service
+  backend-service:
+    build:
+      context: ./repos/eventgenie-backend
+      dockerfile: Dockerfile
+    container_name: eventgenie-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-eventgenie}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-eventgenie}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      AGENTS_SERVICE_URL: http://agents-service:8001
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      agents-service:
+        condition: service_started
+    networks:
+      - eventgenie-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # EventGenie Frontend
+  frontend:
+    build:
+      context: ./repos/eventgenie-frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL}
+    container_name: eventgenie-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend-service
+    networks:
+      - eventgenie-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  eventgenie-network:
+    driver: bridge
